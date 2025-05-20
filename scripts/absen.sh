@@ -16,8 +16,17 @@ log "[INFO] absen.sh dieksekusi jam $HOUR:$MIN"
 [ ! -f "$SHIFT_FILE" ] && log "[ERROR] Shift file tidak ditemukan" && exit 1
 [ ! -f "$PIN_FILE" ] && log "[ERROR] PIN file tidak ditemukan" && exit 1
 
-SHIFT=$(grep "^$DATE" "$SHIFT_FILE" | awk '{print $2}')
-[ -z "$SHIFT" ] && log "[INFO] Tidak ada shift hari ini ($DATE)" && exit 0
+# Cek shift hari ini, atau jika jam 7 pagi cek shift kemarin untuk shift malam
+if [ "$HOUR" -eq 7 ]; then
+  SHIFT=$(grep "^$(date -d "yesterday" +%F)" "$SHIFT_FILE" | awk '{print $2}')
+  if [ "$SHIFT" = "malam" ]; then
+    log "[INFO] Deteksi shift malam dari hari sebelumnya"
+  fi
+else
+  SHIFT=$(grep "^$DATE" "$SHIFT_FILE" | awk '{print $2}')
+fi
+
+[ -z "$SHIFT" ] && log "[INFO] Tidak ada shift aktif sesuai kondisi (tanggal $DATE / jam $HOUR)" && exit 0
 
 PIN=$(cat "$PIN_FILE")
 
@@ -32,7 +41,7 @@ unlock_screen() {
     log "[INFO] Layar sudah menyala, lanjut swipe dan input PIN"
   else
     log "[INFO] Layar belum menyala, coba tap untuk wake"
-    input tap 500 500 500 500
+    input tap 500 500
     sleep 2
 
     if is_screen_on; then
