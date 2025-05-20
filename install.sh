@@ -1,6 +1,6 @@
 #!/data/data/com.termux/files/usr/bin/bash
 
-VERSION="v1.0"
+VERSION="V1.0"
 BASE_URL="https://github.com/vayln/autoabsen/releases/download/$VERSION"
 APK_NAME="mt.apk"
 DEST_DIR="$HOME/storage/downloads/autoabsen"
