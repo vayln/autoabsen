@@ -1,0 +1,1 @@
+allow magisk_daemon sysfs_power_wake_lock file w
