@@ -9,6 +9,29 @@ LOG_FILE="/sdcard/absenlog.txt"
 SHIFT_FILE="/data/adb/modules/autoabsen/shift_jadwal.txt"
 PIN_FILE="/data/adb/modules/autoabsen/pin.txt"
 
+send_notif() {
+  MESSAGE="$1"
+
+  # Telegram
+  TELE_CONF="/data/adb/modules/autoabsen/conf/telegram.conf"
+  if [ -f "$TELE_CONF" ]; then
+    source "$TELE_CONF"
+    curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+      -d chat_id="$CHAT_ID" \
+      -d text="$MESSAGE" \
+      -d parse_mode="Markdown" >/dev/null
+  fi
+
+  # Discord
+  DISCORD_CONF="/data/adb/modules/autoabsen/conf/discord.conf"
+  if [ -f "$DISCORD_CONF" ]; then
+    source "$DISCORD_CONF"
+    curl -s -X POST -H "Content-Type: application/json" \
+      -d "{\"content\": \"$MESSAGE\"}" \
+      "$WEBHOOK_URL" >/dev/null
+  fi
+}
+
 log() {
   echo "$(date '+%Y-%m-%d %H:%M:%S') $1" >> "$LOG_FILE"
 }
@@ -53,7 +76,6 @@ unlock_screen() {
   sleep 2
 }
 
-
 do_absen() {
   log "[INFO] Menjalankan absen shift $SHIFT - $JENIS"
   unlock_screen
@@ -64,16 +86,18 @@ do_absen() {
   input tap 980 2280
   sleep 2
   am start -n com.pulsahandal.simpeg/.MainActivity
-  sleep 5
+  sleep 10
   input tap 880 750
   sleep 4
   am force-stop com.blogspot.newapphorizons.fakegps
   am force-stop com.pulsahandal.simpeg
-  sleep 1
-  input keyevent KEYCODE_APP_SWITCH
   sleep 2
+  input keyevent KEYCODE_APP_SWITCH
+  sleep 4
   input tap 550 2250
+  sleep 1
   log "[INFO] Absen selesai dan aplikasi ditutup"
+  send_notif "*Absen berhasil* pada $TIME untuk shift *$SHIFT - $JENIS*"
 }
 
 log "[INFO] absen.sh dieksekusi jam $TIME"
@@ -100,21 +124,43 @@ if [ "$HOUR" -eq 7 ]; then
     JENIS="malam_pulang"
     log "[INFO] Deteksi shift malam untuk pulang (data $YESTERDAY)"
 
-    LAST_FILE="/data/adb/modules/autoabsen/last_absen_${JENIS}.txt"
-    if [ -f "$LAST_FILE" ]; then
-      LAST_EPOCH=$(cat "$LAST_FILE")
-      NOW_EPOCH=$(date +%s)
-      DIFF=$((NOW_EPOCH - LAST_EPOCH))
-      if [ "$DIFF" -lt 3600 ]; then
-        log "[INFO] Sudah absen $JENIS kurang dari 1 jam lalu"
-        exit 0
-      fi
+    ATTEMPT_FILE="/data/adb/modules/autoabsen/attempt_${JENIS}.txt"
+    NOW_EPOCH=$(date +%s)
+
+    if [ ! -f "$ATTEMPT_FILE" ]; then
+      echo "1:$NOW_EPOCH" > "$ATTEMPT_FILE"
+      log "[INFO] Percobaan ke-1 absen $JENIS"
+      do_absen
+      input keyevent 26
+      exit 0
     fi
 
-    do_absen
-    date +%s > "$LAST_FILE"
-    input keyevent 26
-    exit 0
+    ATTEMPT_DATA=$(cat "$ATTEMPT_FILE")
+    COUNT=$(echo "$ATTEMPT_DATA" | cut -d':' -f1)
+    FIRST_EPOCH=$(echo "$ATTEMPT_DATA" | cut -d':' -f2)
+
+    if [ $((NOW_EPOCH - FIRST_EPOCH)) -ge 3600 ]; then
+      log "[INFO] Reset percobaan karena lebih dari 1 jam"
+      COUNT=1
+      FIRST_EPOCH=$NOW_EPOCH
+      echo "$COUNT:$FIRST_EPOCH" > "$ATTEMPT_FILE"
+      log "[INFO] Percobaan ke-1 absen $JENIS"
+      do_absen
+      input keyevent 26
+      exit 0
+    fi
+
+    if [ "$COUNT" -lt 4 ]; then
+      COUNT=$((COUNT + 1))
+      echo "$COUNT:$FIRST_EPOCH" > "$ATTEMPT_FILE"
+      log "[INFO] Percobaan ke-$COUNT absen $JENIS"
+      do_absen
+      input keyevent 26
+      exit 0
+    else
+      log "[INFO] Sudah 4x percobaan absen $JENIS, tidak dijalankan lagi"
+      exit 0
+    fi
   fi
 fi
 
@@ -132,7 +178,7 @@ case "$SHIFT" in
   pagi)
     if [ "$HOUR" -eq 6 ] && [ "$MIN" -le 10 ]; then
       JENIS="pagi_datang"
-    elif [ "$HOUR" -eq 14 ] && [ "$MIN" -le 10 ]; then
+    elif [ "$HOUR" -eq 14 ]; then
       JENIS="pagi_pulang"
     else
       log "[INFO] Bukan waktu absen shift pagi (jam $HOUR:$MIN)"
@@ -142,7 +188,7 @@ case "$SHIFT" in
   middle)
     if [ "$HOUR" -eq 9 ] && [ "$MIN" -le 10 ]; then
       JENIS="middle_datang"
-    elif [ "$HOUR" -eq 17 ] && [ "$MIN" -le 10 ]; then
+    elif [ "$HOUR" -eq 17 ]; then
       JENIS="middle_pulang"
     else
       log "[INFO] Bukan waktu absen shift middle (jam $HOUR:$MIN)"
@@ -152,7 +198,7 @@ case "$SHIFT" in
   sore)
     if [ "$HOUR" -eq 13 ] && [ "$MIN" -le 10 ]; then
       JENIS="sore_datang"
-    elif [ "$HOUR" -eq 21 ] && [ "$MIN" -le 10 ]; then
+    elif [ "$HOUR" -eq 21 ]; then
       JENIS="sore_pulang"
     else
       log "[INFO] Bukan waktu absen shift sore (jam $HOUR:$MIN)"
@@ -175,19 +221,53 @@ case "$SHIFT" in
     ;;
 esac
 
-LAST_FILE="/data/adb/modules/autoabsen/last_absen_${JENIS}.txt"
-if [ -f "$LAST_FILE" ]; then
-  LAST_EPOCH=$(cat "$LAST_FILE")
+if echo "$JENIS" | grep -q "_pulang"; then
+  ATTEMPT_FILE="/data/adb/modules/autoabsen/attempt_${JENIS}.txt"
   NOW_EPOCH=$(date +%s)
-  DIFF=$((NOW_EPOCH - LAST_EPOCH))
-  if [ "$DIFF" -lt 3600 ]; then
-    log "[INFO] Sudah absen $JENIS kurang dari 1 jam lalu"
+  if [ ! -f "$ATTEMPT_FILE" ]; then
+    echo "1:$NOW_EPOCH" > "$ATTEMPT_FILE"
+    log "[INFO] Percobaan ke-1 absen $JENIS"
+    do_absen
+    input keyevent 26
     exit 0
   fi
+  ATTEMPT_DATA=$(cat "$ATTEMPT_FILE")
+  COUNT=$(echo "$ATTEMPT_DATA" | cut -d':' -f1)
+  FIRST_EPOCH=$(echo "$ATTEMPT_DATA" | cut -d':' -f2)
+  if [ $((NOW_EPOCH - FIRST_EPOCH)) -ge 3600 ]; then
+    COUNT=1
+    FIRST_EPOCH=$NOW_EPOCH
+    echo "$COUNT:$FIRST_EPOCH" > "$ATTEMPT_FILE"
+    log "[INFO] Reset percobaan dan jalankan ke-1 absen $JENIS"
+    do_absen
+    input keyevent 26
+    exit 0
+  fi
+  if [ "$COUNT" -lt 4 ]; then
+    COUNT=$((COUNT + 1))
+    echo "$COUNT:$FIRST_EPOCH" > "$ATTEMPT_FILE"
+    log "[INFO] Percobaan ke-$COUNT absen $JENIS"
+    do_absen
+    input keyevent 26
+    exit 0
+  else
+    log "[INFO] Sudah 4x percobaan absen $JENIS, tidak dijalankan lagi"
+    exit 0
+  fi
+else
+  LAST_FILE="/data/adb/modules/autoabsen/last_absen_${JENIS}.txt"
+  if [ -f "$LAST_FILE" ]; then
+    LAST_EPOCH=$(cat "$LAST_FILE")
+    NOW_EPOCH=$(date +%s)
+    DIFF=$((NOW_EPOCH - LAST_EPOCH))
+    if [ "$DIFF" -lt 3600 ]; then
+      log "[INFO] Sudah absen $JENIS kurang dari 1 jam lalu"
+      exit 0
+    fi
+  fi
+  do_absen
+  date +%s > "$LAST_FILE"
 fi
-
-do_absen
-date +%s > "$LAST_FILE"
 
 case "$JENIS" in
   *_datang)
