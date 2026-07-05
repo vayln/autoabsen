@@ -36,8 +36,8 @@ jobs:
           {
             "version": "${VERSION}",
             "versionCode": ${VERSION_CODE},
-            "zipUrl": "https://$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@raw.githubusercontent.com/${USER}/${REPO}/release/module.zip",
-            "changelog": "https://$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@raw.githubusercontent.com/${USER}/${REPO}/release/changelog.md"
+            "zipUrl": "https://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@raw.githubusercontent.com/${USER}/${REPO}/release/module.zip",
+            "changelog": "https://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@raw.githubusercontent.com/${USER}/${REPO}/release/changelog.md"
           }
           EOF
 
