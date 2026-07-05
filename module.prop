@@ -3,4 +3,5 @@ name=AutoAbsen
 version=1.0
 versionCode=1
 author=Vayleen
-description=Auto absen harian
+description=Auto Absen
+updateJson=https://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@raw.githubusercontent.com/vayln/autoabsen/main/update.json
