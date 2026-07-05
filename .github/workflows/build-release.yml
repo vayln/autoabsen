@@ -64,4 +64,22 @@ jobs:
           git commit -m "Automated build for version ${{ steps.prop.outputs.version }} (code: ${{ steps.prop.outputs.version_code }})"
           
           # Force push ke branch 'release' di repo yang sama
-          git push -f https://${{ secrets.MAGISK_TOKEN }}@github.com/${{ github.repository }}.git release
+     - name: Deploy to Release Branch
+        run: |
+          # Mengonfigurasi git untuk push ke branch 'release'
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --global init.defaultBranch main
+          
+          # Membuat folder sementara untuk deployment
+          mkdir deploy_dir
+          mv module.zip update.json changelog.md deploy_dir/
+          
+          cd deploy_dir
+          git init
+          git checkout -b release
+          git add .
+          git commit -m "Automated build for version ${{ steps.prop.outputs.version }} (code: ${{ steps.prop.outputs.version_code }})"
+          
+          # PERBAIKAN: Menggunakan GITHUB_TOKEN bawaan dengan format yang benar
+          git push -f https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git release
