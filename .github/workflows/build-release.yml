@@ -1,0 +1,67 @@
+name: Build and Deploy Magisk Module
+
+on:
+  push:
+    branches:
+      - main # Jalankan otomatis setiap kali push ke branch main
+    paths-ignore:
+      - 'README.md'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Parse module.prop
+        id: prop
+        run: |
+          # Membaca nilai dari module.prop
+          VERSION=$(grep -i '^version=' module.prop | cut -d= -f2 | xargs)
+          VERSION_CODE=$(grep -i '^versionCode=' module.prop | cut -d= -f2 | xargs)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version_code=$VERSION_CODE" >> $GITHUB_OUTPUT
+
+      - name: Create update.json
+        env:
+          TOKEN: ${{ secrets.MAGISK_TOKEN }}
+          USER: ${{ github.repository_owner }}
+          REPO: ${{ github.event.repository.name }}
+          VERSION: ${{ steps.prop.outputs.version }}
+          VERSION_CODE: ${{ steps.prop.outputs.version_code }}
+        run: |
+          # Membuat file update.json otomatis dengan menyisipkan token privat
+          cat <<EOF > update.json
+          {
+            "version": "${VERSION}",
+            "versionCode": ${VERSION_CODE},
+            "zipUrl": "https://${TOKEN}@raw.githubusercontent.com/${USER}/${REPO}/release/module.zip",
+            "changelog": "https://${TOKEN}@raw.githubusercontent.com/${USER}/${REPO}/release/changelog.md"
+          }
+          EOF
+
+      - name: Create Flashable ZIP
+        run: |
+          # Menghapus file sisa jika ada dan melakukan zip semua file module
+          rm -f module.zip
+          zip -r module.zip ./* -x ".git*" ".github*" "update.json"
+
+      - name: Deploy to Release Branch
+        run: |
+          # Mengonfigurasi git untuk push ke branch 'release'
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          # Membuat folder sementara untuk deployment
+          mkdir deploy_dir
+          mv module.zip update.json changelog.md deploy_dir/
+          
+          cd deploy_dir
+          git init
+          git checkout -b release
+          git add .
+          git commit -m "Automated build for version ${{ steps.prop.outputs.version }} (code: ${{ steps.prop.outputs.version_code }})"
+          
+          # Force push ke branch 'release' di repo yang sama
+          git push -f https://${{ secrets.MAGISK_TOKEN }}@github.com/${{ github.repository }}.git release
